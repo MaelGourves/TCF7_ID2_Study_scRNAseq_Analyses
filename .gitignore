@@ -1,0 +1,21 @@
+# Downloaded single-cell objects
+data/
+*.rds
+*.rds.gz
+*.h5
+*.h5ad
+*.loom
+*.mtx
+*.mtx.gz
+
+# R session files
+.RData
+.Rhistory
+.Ruserdata
+.Rproj.user/
+
+# Temporary and operating-system files
+*.tmp
+*.temp
+.DS_Store
+Thumbs.db
