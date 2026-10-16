@@ -13,22 +13,6 @@ The workflow examines transcriptional differences among four CD8+ T-cell populat
 The analyses include Gaussian mixture model (GMM) classification, violin plots, differential-expression heatmaps and gene-set enrichment analysis (GSEA).
 
 
-Directory structure
-GSE270651/
-├── README.md
-├── 01_GMM_classification.R
-├── 02_violin_plots.R
-├── 03_heatmap.R
-├── 04_GSEA_functions.R
-├── 05_GSEA_analysis.R
-├── data/
-│   └── My_SelectedPathwaysClonotypes_GSEA.gmt
-└── session_info/
-    ├── 01_GMM_sessionInfo.txt
-    ├── 02_violin_sessionInfo.txt
-    ├── 03_heatmap_sessionInfo.txt
-    └── 05_GSEA_sessionInfo.txt
-
 Large RDS input files are not stored in the GitHub repository. They are available from the associated Zenodo record: PENDING.
 
 
