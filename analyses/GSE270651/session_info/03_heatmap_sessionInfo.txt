@@ -1,0 +1,35 @@
+R version 4.5.2 (2025-10-31 ucrt)
+Platform: x86_64-w64-mingw32/x64
+Running under: Windows 11 x64 (build 26200)
+
+Matrix products: default
+  LAPACK version 3.12.1
+
+locale:
+[1] LC_COLLATE=French_France.utf8  LC_CTYPE=French_France.utf8    LC_MONETARY=French_France.utf8
+[4] LC_NUMERIC=C                   LC_TIME=French_France.utf8    
+
+time zone: Europe/Paris
+tzcode source: internal
+
+attached base packages:
+[1] stats     graphics  grDevices utils     datasets  methods   base     
+
+other attached packages:
+[1] tidyr_1.3.2    stringr_1.6.0  msigdbr_26.1.0 fgsea_1.36.2   cowplot_1.2.0  dplyr_1.2.1   
+[7] plotly_4.12.1  ggrepel_0.9.8  ggplot2_4.0.3 
+
+loaded via a namespace (and not attached):
+ [1] utf8_1.2.6          generics_0.1.4      stringi_1.8.7       lattice_0.22-7     
+ [5] digest_0.6.39       magrittr_2.0.4      grid_4.5.2          RColorBrewer_1.1-3 
+ [9] fastmap_1.2.0       jsonlite_2.0.0      Matrix_1.7-4        httr_1.4.8         
+[13] purrr_1.2.2         crosstalk_1.2.2     viridisLite_0.4.3   scales_1.4.0       
+[17] codetools_0.2-20    textshaping_1.0.5   cli_3.6.5           rlang_1.1.7        
+[21] withr_3.0.3         tools_4.5.2         parallel_4.5.2      BiocParallel_1.44.0
+[25] fastmatch_1.1-8     curl_7.1.0          assertthat_0.2.1    babelgene_22.9     
+[29] vctrs_0.7.3         R6_2.6.1            lifecycle_1.0.5     htmlwidgets_1.6.4  
+[33] ragg_1.5.2          pkgconfig_2.0.3     pillar_1.11.1       gtable_0.3.6       
+[37] data.table_1.18.6.1 glue_1.8.0          Rcpp_1.1.2          systemfonts_1.3.2  
+[41] tibble_3.3.1        tidyselect_1.2.1    rstudioapi_0.19.0   farver_2.1.2       
+[45] snow_0.4-4          htmltools_0.5.9     svglite_2.2.2       labeling_0.4.3     
+[49] compiler_4.5.2      S7_0.2.1           
