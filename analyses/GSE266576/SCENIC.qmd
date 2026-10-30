@@ -1,0 +1,1059 @@
+---
+title: "SCENIC"
+format: html
+editor: visual
+jupyter: python3
+---
+
+
+
+# R library
+
+```{r}
+
+library(dplyr)
+library(tidyverse)
+library(ggplot2)
+library(dplyr)
+library(gridExtra)
+library(ggplot2)
+library(ggalluvial)
+library(forcats)
+library(randomcoloR)
+library(viridis)
+library(ggsignif)
+library(Seurat)
+library(ggprism)
+
+
+
+```
+
+# read in scRNAseq data
+
+```{r fig.height=6, fig.width=6}
+sc = readRDS("input/Zach_integrated10X.rds")
+
+sc$cell_type = Idents(sc)
+
+
+DimPlot(sc, label = T, repel = T, group.by = "cell_type") +
+  theme(aspect.ratio = 1)
+
+```
+
+# get threshold for ID2+
+
+```{r fig.height=6, fig.width=6}
+
+gene = "ID2"
+
+x = unname(sc@assays$integrated$scale.data[gene,])
+
+
+library(mclust)
+# fit Gaussian Mixture Model (let mclust choose best model)
+fit <- Mclust(x, G = 2)
+
+# cluster assignments
+clusters <- fit$classification
+
+# cutoff is midpoint between the two means
+cutoff <- mean(fit$parameters$mean)
+cutoff
+
+ggplot(data.frame(
+  exp = x), 
+  aes(x = exp)) + 
+  geom_histogram(aes(y = ..density..), 
+                 colour = "black",
+                 fill = "white") +
+  geom_density(alpha = .2, fill="#FF6666") +
+  labs(x = "Expression", y = "Density",
+       title = "ID2+ Cutoff Determined by Caussian Mixture Model") + 
+  geom_vline(aes(xintercept = cutoff),
+             color = "royalblue",
+             linetype = "dashed") + 
+  tmp_theme
+
+
+```
+
+# create ID2_pos in metadata & plot
+
+```{r fig.height=6, fig.width=6}
+ID2_pos_bool = sc@assays$integrated$scale.data[gene,] >= cutoff
+
+sc$ID2_pos <- ID2_pos_bool
+
+
+
+DimPlot(sc, group.by = "ID2_pos") +
+  scale_color_manual(values = c(
+    "TRUE" = "red",
+    "FALSE" = "gray"
+  )) + 
+  theme(aspect.ratio = 1)
+
+
+
+  
+```
+
+
+
+# get threshold for TCF7+
+
+```{r fig.height=6, fig.width=6}
+
+gene = "TCF7"
+
+x = unname(sc@assays$integrated$scale.data[gene,])
+
+
+library(mclust)
+# fit Gaussian Mixture Model (let mclust choose best model)
+fit <- Mclust(x, G = 2)
+
+# cluster assignments
+clusters <- fit$classification
+
+# cutoff is midpoint between the two means
+cutoff <- mean(fit$parameters$mean)
+cutoff
+
+ggplot(data.frame(
+  exp = x), 
+  aes(x = exp)) + 
+  geom_histogram(aes(y = ..density..), 
+                 colour = "black",
+                 fill = "white") +
+  geom_density(alpha = .2, fill="#FF6666") +
+  labs(x = "Expression", y = "Density",
+       title = "TCF7+ Cutoff Determined by Caussian Mixture Model") + 
+  geom_vline(aes(xintercept = cutoff),
+             color = "royalblue",
+             linetype = "dashed") + 
+  tmp_theme
+
+
+```
+
+# create ID2_pos in metadata & plot
+
+```{r fig.height=6, fig.width=6}
+
+TCF7_pos_bool = sc@assays$integrated$scale.data[gene,] >= cutoff
+
+sc$TCF7_pos <- TCF7_pos_bool
+
+
+
+DimPlot(sc, group.by = "TCF7_pos") +
+  scale_color_manual(values = c(
+    "TRUE" = "red",
+    "FALSE" = "gray"
+  )) + 
+  theme(aspect.ratio = 1)
+
+
+
+  
+```
+
+
+
+# identify populations TCF1+ID2- vs TCF1-ID2+ vs TCF1+ID2+ vs TCF1-ID2-
+
+```{r fig.height=6, fig.width=6}
+
+sc@meta.data = sc@meta.data %>%
+  mutate(TCF7_ID2_pop = case_when(
+    ID2_pos == T & TCF7_pos == F ~ "ID2+",
+    ID2_pos == F & TCF7_pos == T ~ "TCF7+",
+    ID2_pos == T & TCF7_pos == T ~ "TCF7+ID2+",
+    TRUE ~ "TCF7-ID2-"
+  ))
+
+
+sc@meta.data %>%
+  dplyr::count(TCF7_ID2_pop)
+
+
+```
+
+
+# SCENIC library
+```{r}
+
+
+library(SCENIC)
+library(AUCell)
+library(RcisTarget)
+library(GENIE3)
+library(BiocParallel)
+library(doRNG)
+library(rstatix)
+library(RcisTarget)
+
+data(
+  list = "motifAnnotations_hgnc_v9",
+  package = "RcisTarget",
+  envir = environment()
+)
+
+motifAnnotations_hgnc <- motifAnnotations_hgnc_v9
+```
+
+# extract RNA count matrix
+
+```{r}
+
+
+DefaultAssay(sc) <- "RNA"
+
+exprMat <- GetAssayData(
+  sc,
+  assay = "RNA",
+  layer = "counts"
+)
+# 8111 features & 9012 cells
+
+exprMat <- exprMat[
+  !is.na(rownames(exprMat)) &
+    rownames(exprMat) != "",
+  ,
+  drop = FALSE
+]
+
+
+```
+
+# create a new SCENIC working directory
+
+```{r}
+dir.create(
+  "SCENIC",
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
+setwd("SCENIC")
+
+dir.create("data", showWarnings = FALSE)
+dir.create("int", showWarnings = FALSE)
+dir.create("output", showWarnings = FALSE)
+
+
+saveRDS(exprMat, "SCENIC/data/exprMat_counts.rds")
+saveRDS(sc@meta.data, "SCENIC/data/cell_metadata.rds")
+
+```
+
+# initialize
+
+```{r}
+
+
+dbDir <- "/Users/weiwen_zhang/projects/SCENIC/databases"
+
+dbFiles <- list.files(dbDir, pattern = "\\.feather$", full.names = F)
+
+
+scenicOptions <- initializeScenic(
+  org = "hgnc",
+  dbDir = dbDir,
+  dbs = dbFiles,
+  datasetTitle = "TCF7 ID2 T cells",
+  nCores = 8
+)
+
+scenicOptions@settings$seed <- 123
+
+saveRDS(scenicOptions, "SCENIC/int/scenicOptions.rds")
+```
+
+# check overlap between my genes + database
+
+```{r}
+
+dbGenes <- getDbTfs(scenicOptions)
+
+tf_overlap <- intersect(rownames(exprMat), dbGenes)
+
+length(tf_overlap)
+head(tf_overlap)
+```
+
+# filter lowly expressed genes
+
+```{r}
+
+
+quantile(rowSums(exprMat), probs = seq(0, 1, 0.1))
+
+quantile(rowSums(exprMat > 0), probs = seq(0, 1, 0.1))
+
+# manual
+nCountsPerGene <- Matrix::rowSums(exprMat, na.rm = TRUE)
+nCellsPerGene  <- Matrix::rowSums(exprMat > 0, na.rm = TRUE)
+
+minCountsPerGene <- 3 * 0.01 * ncol(exprMat)
+minSamples <- 0.01 * ncol(exprMat)
+
+genesKept <- names(nCountsPerGene)[
+  nCountsPerGene > minCountsPerGene &
+  nCellsPerGene > minSamples
+]
+
+
+exprMat_filtered <- exprMat[genesKept, , drop = FALSE]
+
+dim(exprMat) # 8111
+dim(exprMat_filtered) # 7055
+dim(exprMat) - dim(exprMat_filtered) # 1056
+c("TCF7", "ID2") %in% rownames(exprMat_filtered)
+
+saveRDS(exprMat_filtered, "SCENIC/data/exprMat_filtered.rds")
+```
+
+# run correlation
+
+```{r}
+runCorrelation(
+  as.matrix(exprMat_filtered),
+  scenicOptions
+)
+
+
+getwd()
+SCENIC::getIntName(scenicOptions, "corrMat")
+
+
+
+```
+
+# run GENIE3
+
+nohup run
+very slow
+
+```{r}
+set.seed(123)
+
+
+runGenie3(
+  as.matrix(exprMat_filtered),
+  scenicOptions
+)
+```
+
+```{r}
+
+scenicOptions = readRDS("SCENIC/int/scenicOptions_after_GENIE3.rds")
+```
+
+# convert GENIE3 network into co-expression modules
+
+this converts GENIE3 link list into candidate TF-centered co-expression modules
+
+```{r}
+scenicOptions <- runSCENIC_1_coexNetwork2modules(
+  scenicOptions
+)
+
+saveRDS(
+  scenicOptions,
+  "SCENIC/int/scenicOptions_after_modules.rds"
+)
+```
+
+```{r}
+scenicOptions = readRDS("SCENIC/int/scenicOptions_after_modules.rds")
+```
+
+# perform motif enrichment + create regulons
+
+```{r}
+
+scenicOptions <- runSCENIC_2_createRegulons(
+  scenicOptions,
+  onlyPositiveCorr = TRUE
+)
+```
+
+```{r}
+saveRDS(
+  scenicOptions,
+  "SCENIC/int/scenicOptions_after_regulons.rds"
+)
+```
+
+
+
+# no ID2 regulon
+
+GENIE3 found genes whose expression was associated with ID2 
+SCENIC built candidate ID2 co-expression modules during RcisTarget motif-enrichment step 
+those candidate targets did not produce a retained motif-supported ID2 regulon
+
+
+```{r}
+scenicOptions = readRDS("SCENIC/int/scenicOptions_after_regulons.rds")
+```
+
+```{r}
+
+regulons <- loadInt(
+  scenicOptions,
+  "regulons"
+)
+
+# no ID2
+names(regulons)[grepl(
+  "TCF7|ID2",
+  names(regulons),
+  ignore.case = TRUE
+)]
+
+
+# check ID2 in GENIE3 network
+
+genie3_links <- loadInt(
+  scenicOptions,
+  "genie3ll"
+)
+
+
+ID2_genie3 <- genie3_links %>%
+  dplyr::filter(TF == "ID2")
+
+nrow(ID2_genie3)
+
+
+
+# check whether ID2 formed co-expression modules
+
+tfModules <- loadInt(
+  scenicOptions,
+  "tfModules_asDF"
+)
+
+colnames(tfModules)
+
+
+ID2_modules <- tfModules %>%
+  dplyr::filter(TF == "ID2")
+
+nrow(ID2_modules)
+
+ID2_modules %>%
+  dplyr::count(method)
+
+
+# check motif enrichment results
+# no qualifying ID2 motif enrichment
+motif_enrichment <- loadInt(
+  scenicOptions,
+  "motifEnrichment_selfMotifs_wGenes"
+)
+
+ID2_motif <- motif_enrichment[
+  grepl(
+    "ID2",
+    motif_enrichment$highlightedTFs,
+    ignore.case = TRUE
+  ),
+]
+
+nrow(ID2_motif) # 0
+
+
+```
+
+# score regulon activity in every cell
+
+```{r}
+exprMat <- GetAssayData(
+  sc,
+  assay = "RNA",
+  layer = "counts"
+)
+# 8111 features & 9012 cells
+
+exprMat <- exprMat[
+  !is.na(rownames(exprMat)) &
+    rownames(exprMat) != "",
+  ,
+  drop = FALSE
+]
+
+dim(exprMat)
+
+# install.packages("doMC")
+
+scenicOptions <- runSCENIC_3_scoreCells(
+  scenicOptions,
+  exprMat # use full version
+)
+
+
+saveRDS(
+  scenicOptions,
+  "SCENIC/int/scenicOptions_after_AUCell.rds"
+)
+
+```
+
+# insepct regulon AUCell result
+
+```{r}
+
+regulonAUC <- loadInt(
+  scenicOptions,
+  "aucell_regulonAUC"
+)
+
+auc_mat <- AUCell::getAUC(regulonAUC)
+
+dim(auc_mat) # 262 regulons * 9012 cells [262, 9012]
+
+
+tcf7_regulon <- SCENIC::selectRegulons(
+  regulonAUC,
+  tfs = "TCF7",
+  onlyNonDuplicatedExtended = TRUE
+  # helps avoid keeping both a direct & redundant extended version when both exist
+  
+) # use TCF7 (22g)
+
+
+
+```
+
+# add TCF7 regulon activity back to Seurat
+
+```{r}
+
+
+
+tcf7_name = "TCF7 (22g)"
+# tcf7_name = "TCF7_extended (63g)"
+
+tcf7_auc <- auc_mat[TCF7_name, , drop = FALSE]
+
+stopifnot(identical(colnames(tcf7_auc), colnames(sc)))
+
+
+
+sc$TCF7_regulon_AUC = unname(tcf7_auc[1,])
+
+```
+
+# inspect TCF7 regulon within TCF7_ID2_pop
+
+```{r}
+
+tcf7_plot_df <- sc@meta.data %>%
+  tibble::rownames_to_column("cell") %>%
+  mutate(TCF7_ID2_pop = factor(TCF7_ID2_pop,
+                               levels = c("TCF7-ID2-",
+                                          "ID2+", 
+                                          "TCF7+ID2+",
+                                          "TCF7+"
+                                          )))
+
+tcf7_plot_df %>%
+  group_by(TCF7_ID2_pop) %>%
+  summarize(
+    n_cells = n(),
+    mean = mean(TCF7_regulon_AUC),
+    median = median(TCF7_regulon_AUC),
+    .groups = "drop") %>%
+  write.csv("output/SCENIC/TCF7_regulon_AUC_comparison.csv",
+            row.names = F)
+
+
+library(rstatix)
+
+comparisons <- list(
+  c("TCF7+", "TCF7+ID2+"),
+  c("TCF7+ID2+", "ID2+"),
+  c("TCF7+", "ID2+")
+)
+
+tcf7_cell_test <- tcf7_plot_df %>%
+  wilcox_test(
+    TCF7_regulon_AUC ~ TCF7_ID2_pop,
+    comparisons = comparisons
+  ) %>%
+  adjust_pvalue(method = "BH")
+
+tcf7_cell_test
+
+
+
+ggplot(
+  tcf7_plot_df,
+  aes(
+    x = TCF7_ID2_pop,
+    y = TCF7_regulon_AUC,
+    fill = TCF7_ID2_pop
+  )
+  ) +
+  geom_violin(
+    trim = FALSE,
+    alpha = 0.6
+  ) +
+  geom_boxplot(
+    width = 0.15,
+    outlier.shape = NA,
+    fill = "white",
+    median.linewidth = 0.5
+  ) +
+  geom_signif(comparisons = list(c("TCF7-ID2-", "ID2+"),
+                                 c("ID2+", "TCF7+ID2+"),
+                                 c("TCF7+", "TCF7+ID2+"),
+                                 c("ID2+", "TCF7+")
+                                 ),
+              test = "wilcox.test",
+              map_signif_level = c("***" = 0.001, "**" = 0.01, "*" = 0.05, " " = 1),
+              textsize = 6,
+              tip_length = 0.01,
+              vjust = 0.5,
+              y_position = c(0.3, 0.3, 0.3, 0.32)
+              ) +
+  labs(
+    x = NULL,
+    y = "TCF7 Regulon AUC",
+    title = "TCF7 Regulon Activity"
+  ) +
+  theme_classic() +
+  theme(
+    legend.position = "none"
+  )
+
+
+ggsave("output/SCENIC/TCF7_regulon_AUC_comparison.pdf")
+
+```
+
+# inspect all other regulon within TCF7_ID2_pop
+
+```{r}
+
+
+stopifnot(identical(colnames(auc_mat), colnames(sc)))
+
+auc_df = t(auc_mat) %>%
+  as.data.frame()
+
+auc_df$TCF7_ID2_pop = sc$TCF7_ID2_pop
+
+write.csv(auc_df, "output/SCENIC/auc_df.csv",
+          row.names = T)
+
+
+library(rstatix)
+
+comparisons <- list(
+  c("TCF7+", "TCF7+ID2+"),
+  c("TCF7+ID2+", "ID2+"),
+  c("TCF7+", "ID2+")
+)
+
+geneset = setdiff(colnames(auc_df), "TCF7_ID2_pop")
+
+auc_long <- auc_df %>%
+  tibble::rownames_to_column("cell") %>%
+  pivot_longer(
+    cols = all_of(geneset),
+    names_to = "regulon",
+    values_to = "AUC"
+  )
+
+
+regulon_tests <- auc_long %>%
+  group_by(regulon) %>%
+  wilcox_test(
+    AUC ~ TCF7_ID2_pop,
+    comparisons = comparisons
+  ) %>%
+  ungroup()
+
+
+write.csv(regulon_tests, "output/SCENIC/TCF_ID2_pop_regulon_AUC_wilcox_test.csv",
+          row.names = F)
+
+auc_long %>%
+  group_by(regulon, TCF7_ID2_pop) %>%
+  summarize(
+    AUC_mean = mean(AUC),
+    AUC_median = median(AUC),
+    .groups = "drop"
+  ) %>%
+  write.csv("output/SCENIC/TCF_ID2_pop_regulon_AUC_mean_median.csv",
+            row.names = F)
+
+```
+
+# about ID2
+
+SCENIC asks a much stronger question: "Do promoters/enhancers of these genes contain DNA binding motifs for ID2?"
+
+ID2 failed bc: ID2 is not a DNA-binding transcription factor ID2 belongs to Inhibitor of DNA binding (ID) family
+
+## use GENIE3 output before motif pruning to get candidate ID2 co-expression module
+
+```{r}
+
+
+scenicOptions <- readRDS("SCENIC/int/scenicOptions_after_modules.Rds")
+
+# GENIE3 output: columns should be TF, Target, and weight
+genie3_links <- loadInt(
+  scenicOptions,
+  "genie3ll"
+)
+
+colnames(genie3_links)
+head(genie3_links)
+
+# extract raw ID2 GENIE3 links
+
+id2_genie3 <- genie3_links %>%
+  filter(TF == "ID2") %>%
+  arrange(desc(weight)) %>%
+  mutate(rank = row_number())
+
+nrow(id2_genie3)
+head(id2_genie3, 50)
+
+
+write.csv(
+  id2_genie3,
+  "output/SCENIC/ID2/ID2_GENIE3_candidate_targets.csv",
+  row.names = FALSE
+)
+
+# extract candidate ID2 modules
+
+tf_modules <- loadInt(
+  scenicOptions,
+  "tfModules_asDF"
+)
+
+colnames(tf_modules)
+head(tf_modules)
+
+
+id2_modules <- tf_modules %>%
+  filter(TF == "ID2") %>%
+  arrange(method, Target)
+
+table(id2_modules$method)
+head(id2_modules, 50)
+
+write.csv(
+  id2_modules,
+  "output/SCENIC/ID2/ID2_SCENIC_candidate_modules.csv",
+  row.names = FALSE
+)
+
+id2_targets_by_method <- split(
+  id2_modules$Target,
+  id2_modules$method
+)
+
+lapply(id2_targets_by_method, length)
+
+id2_targets_by_method
+
+
+# add GENIE3 weights to the module table
+id2_modules_annotated <- id2_modules %>%
+  left_join(
+    id2_genie3 %>%
+      dplyr::select(TF, Target, weight, rank),
+    by = c("TF", "Target")
+  ) %>%
+  arrange(method, desc(weight))
+
+head(id2_modules_annotated, 50)
+
+## targets recovered by several methods may be more robust co-expression candidates
+## although this still does not establish direct ID2 regulation
+id2_modules_annotated %>%
+  dplyr::count(Target, sort = TRUE) %>%
+  head(20) 
+
+
+## corr = 1: positive correlation greater than 0.03
+## corr = -1: negative correlation below −0.03
+## corr = 0: weak correlation
+table(
+  id2_modules_annotated$corr,
+  useNA = "ifany"
+)
+
+id2_modules_annotated <- id2_modules_annotated %>%
+  mutate(
+    association = case_when(
+      corr == 1  ~ "Positive",
+      corr == -1 ~ "Negative",
+      corr == 0  ~ "Weak/neutral",
+      TRUE       ~ "Unavailable"
+    )
+  )
+
+write.csv(
+  id2_modules_annotated,
+  "output/SCENIC/ID2/ID2_module_candidates.csv",
+  row.names = FALSE
+)
+
+
+id2_modules_annotated = read.csv("output/SCENIC/ID2/ID2_module_candidates.csv")
+
+# identify most consistently selected candidates
+
+id2_consensus <- id2_modules_annotated %>%
+  group_by(Target) %>%
+  summarise(
+    weight = max(weight, na.rm = TRUE),
+    genie3_rank = min(rank, na.rm = TRUE),
+    n_methods = n_distinct(method),
+    methods = paste(
+      sort(unique(method)),
+      collapse = "; "
+    ),
+    correlation_class = paste(
+      sort(unique(association)),
+      collapse = "; "
+    ),
+    .groups = "drop"
+  ) %>%
+  arrange(
+    desc(n_methods),
+    desc(weight)
+  )
+
+head(id2_consensus, 50)
+
+
+write.csv(
+  id2_consensus,
+  "output/SCENIC/ID2/ID2_consensus_candidates.csv",
+  row.names = FALSE
+)
+
+```
+
+## create ID2 regulon signature using candidate genes
+
+```{r}
+
+id2_signature <- id2_modules_annotated %>%
+  filter(
+    association == "Positive"
+  ) %>%
+  group_by(Target) %>%
+  summarise(
+    weight = max(weight, na.rm = TRUE),
+    n_methods = n_distinct(method),
+    .groups = "drop"
+  ) %>%
+  filter(
+    n_methods >= 2
+  ) %>%
+  arrange(
+    desc(n_methods),
+    desc(weight)
+  ) %>%
+  slice_head(n = 50) %>%
+  pull(Target) %>%
+  unique()
+
+
+id2_signature
+
+
+id2_signature_present <- intersect(
+  id2_signature,
+  rownames(sc)
+)
+
+ID2_candidate_target = data.frame(
+  TF = "ID2",
+  genes = id2_signature_present
+)
+
+write.csv(ID2_candidate_target,
+          "output/SCENIC/ID2/ID2_candidate_target.csv",
+          row.names = F)
+
+id2_signature_missing <- setdiff(
+  id2_signature,
+  rownames(sc)
+)
+
+length(id2_signature)
+length(id2_signature_present)
+length(id2_signature_missing)
+
+id2_signature_missing
+
+
+```
+
+## score ID2 regulon signature
+
+UCell uses within-cell gene rankings making score less dependent on overall gene-expression composition of dataset than an average-expression score
+
+```{r}
+
+library(UCell)
+
+id2_gene_sets <- list(
+  ID2_candidate = id2_signature_present
+)
+
+DefaultAssay(sc) = "RNA"
+sc <- AddModuleScore_UCell(
+  sc,
+  features = id2_gene_sets
+)
+
+
+set.seed(123)
+
+sc <- AddModuleScore(
+  object = sc,
+  features = list(id2_signature_present),
+  name = "ID2_candidate",
+  assay = "RNA",
+  slot = "data",
+  ctrl = 100
+)
+
+
+sc@meta.data = sc@meta.data %>%
+  rename(ID2_candidate_Seurat = ID2_candidate1)
+
+sc@meta.data
+
+```
+
+## inspect potential ID2 regulon within TCF7_ID2_pop
+
+```{r}
+
+id2_plot_df <- sc@meta.data %>%
+  tibble::rownames_to_column("cell") %>%
+  mutate(TCF7_ID2_pop = factor(TCF7_ID2_pop,
+                               levels = c("TCF7-ID2-",
+                                          "ID2+", "TCF7+ID2+",
+                                          "TCF7+"
+                                          )))
+
+id2_plot_df %>%
+  group_by(TCF7_ID2_pop) %>%
+  summarize(
+    n_cells = n(),
+    mean = mean(ID2_candidate_Seurat),
+    median = median(ID2_candidate_Seurat),
+    .groups = "drop") %>%
+  write.csv("output/SCENIC/ID2_candidate_regulon_comparison.csv",
+            row.names = F)
+
+
+
+
+comparisons <- list(
+  c("TCF7+", "TCF7+ID2+"),
+  c("TCF7+ID2+", "ID2+"),
+  c("TCF7+", "ID2+")
+)
+
+id2_cell_test <- id2_plot_df %>%
+  wilcox_test(
+    ID2_candidate_Seurat ~ TCF7_ID2_pop,
+    comparisons = comparisons
+  ) %>%
+  adjust_pvalue(method = "BH")
+
+id2_cell_test
+
+
+
+ggplot(
+  id2_plot_df,
+  aes(
+    x = TCF7_ID2_pop,
+    y = ID2_candidate_Seurat,
+    fill = TCF7_ID2_pop
+  )
+  ) +
+  geom_violin(
+    trim = FALSE,
+    alpha = 0.6
+  ) +
+  geom_boxplot(
+    width = 0.15,
+    outlier.shape = NA,
+    fill = "white",
+    median.linewidth = 0.5
+  ) +
+  geom_signif(comparisons = list(c("TCF7-ID2-", "ID2+"),
+                                 c("ID2+", "TCF7+ID2+"),
+                                 c("TCF7+", "TCF7+ID2+"),
+                                 c("ID2+", "TCF7+")
+                                 ),
+              test = "wilcox.test",
+              map_signif_level = c("***" = 0.001, "**" = 0.01, "*" = 0.05, " " = 1),
+              textsize = 6,
+              tip_length = 0.01,
+              vjust = 0.5,
+              y_position = c(1.2, 1.2, 1.2, 1.3)
+              ) +
+  labs(
+    x = NULL,
+    y = "ID2 Candidate Regulon Activity",
+    title = "ID2 Candidate Regulon Activity"
+  ) +
+  theme_classic() +
+  theme(
+    legend.position = "none"
+  )
+
+
+ggsave("output/SCENIC/ID2_candidate_regulon_activity_comparison.pdf")
+
+
+```
+
+# make a TCF7 ID2 regulon heatmap
+
+```{r}
+
+plot_df <- sc@meta.data %>%
+  group_by(TCF7_ID2_pop) %>%
+  summarize(`ID2 Regulon Activity` = mean(ID2_candidate_Seurat),
+            `TCF7 Regulon Activity` = mean(TCF7_regulon_AUC)) %>%
+  tibble::column_to_rownames("TCF7_ID2_pop")
+
+pdf("output/SCENIC/TCF7_ID2_regulon_activity_heatmap.pdf",
+    height = 5, width = 10)
+p = pheatmap(t(as.matrix(plot_df)),
+         scale = "row",
+         display_numbers = T,
+         border_color = NA,
+         width = 10,
+         height = 5
+         
+         )
+
+print(p)
+
+dev.off()
+```
